@@ -1,15 +1,20 @@
 package com.example.application.views.mojzabojnik;
 
 import com.drew.imaging.ImageMetadataReader;
+import com.drew.lang.Rational;
 import com.drew.metadata.Metadata;
 import com.drew.metadata.exif.ExifIFD0Directory;
 import com.drew.metadata.exif.ExifSubIFDDirectory;
 import com.drew.metadata.exif.GpsDescriptor;
 import com.drew.metadata.exif.GpsDirectory;
 import com.example.application.FileSystemItem;
+import com.example.application.services.ExifData;
 import com.example.application.services.S3Service;
+import com.flowingcode.vaadin.addons.gridhelpers.GridHelper;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.button.Button;
+import com.vaadin.flow.component.grid.Grid;
+import com.vaadin.flow.component.grid.HeaderRow;
 import com.vaadin.flow.component.html.*;
 import com.vaadin.flow.component.icon.Icon;
 import com.vaadin.flow.component.icon.VaadinIcon;
@@ -17,12 +22,15 @@ import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.TextField;
+import com.vaadin.flow.component.textfield.TextFieldVariant;
 import com.vaadin.flow.component.treegrid.TreeGrid;
 import com.vaadin.flow.component.upload.Upload;
 import com.vaadin.flow.component.upload.receivers.MultiFileMemoryBuffer;
 import com.vaadin.flow.data.provider.hierarchy.AbstractBackEndHierarchicalDataProvider;
 import com.vaadin.flow.data.provider.hierarchy.HierarchicalDataProvider;
 import com.vaadin.flow.data.provider.hierarchy.HierarchicalQuery;
+import com.vaadin.flow.data.renderer.ComponentRenderer;
+import com.vaadin.flow.data.value.ValueChangeMode;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.StreamResource;
 import org.apache.commons.imaging.formats.tiff.taginfos.TagInfo;
@@ -31,8 +39,10 @@ import org.springframework.beans.factory.annotation.Value;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 @Route("")
@@ -41,11 +51,11 @@ public class MainView extends HorizontalLayout {
     private final S3Service s3Service;
 
 
-
+    String searchQuery;
     private TreeGrid<FileSystemItem> treeGrid;
     private FileSystemItem selectedFolder;
     private Image previewImage;
-    private final HierarchicalDataProvider<FileSystemItem, Void> dataProvider;
+    private  HierarchicalDataProvider<FileSystemItem, Void> dataProvider = null;
     private final Anchor mapLink;
     private final VerticalLayout exifContainer = new VerticalLayout();
 
@@ -64,15 +74,15 @@ public class MainView extends HorizontalLayout {
 
         // Create folder components
         TextField folderNameField = new TextField();
-        folderNameField.setPlaceholder("Folder Name");
-        Button createFolderButton = new Button("Create Folder", VaadinIcon.FOLDER_ADD.create());
+        folderNameField.setPlaceholder("Ime mape");
+        Button createFolderButton = new Button("Ustvari mapo", VaadinIcon.FOLDER_ADD.create());
         createFolderButton.addClickListener(event -> {
             String folderName = folderNameField.getValue();
             if (!folderName.isEmpty()) {
                 String key = (selectedFolder != null && selectedFolder.isFolder()) ? selectedFolder.getName() + folderName + "/" : folderName + "/";
                 s3Service.createFolder(key);
                 folderNameField.clear();
-                Notification.show("Folder created successfully", 3000, Notification.Position.MIDDLE);
+                Notification.show("Mapa ustvarjena", 3000, Notification.Position.MIDDLE);
                 if (selectedFolder != null) {
                     treeGrid.getDataProvider().refreshItem(selectedFolder, true);
                     if (!treeGrid.isExpanded(selectedFolder)) {
@@ -82,33 +92,25 @@ public class MainView extends HorizontalLayout {
                     treeGrid.getDataProvider().refreshAll();
                 }
             } else {
-                Notification.show("Folder name cannot be empty", 3000, Notification.Position.MIDDLE);
+                Notification.show("Ime mape ne more biti prazno", 3000, Notification.Position.MIDDLE);
             }
         });
 
         HorizontalLayout folderCreationLayout = new HorizontalLayout(folderNameField, createFolderButton);
 
-        // Search component
         TextField searchField = new TextField();
-        searchField.setPlaceholder("Search files...");
-        Button searchButton = new Button("Search", VaadinIcon.SEARCH.create());
-        searchButton.addClickListener(event -> {
-            String query = searchField.getValue();
-            if (!query.isEmpty()) {
-                List<FileSystemItem> searchResults = s3Service.searchFiles(query);
-                treeGrid.setItems(searchResults);
-            } else {
-                Notification.show("Search query cannot be empty", 3000, Notification.Position.MIDDLE);
-            }
+        searchField.setPlaceholder("Išči datoteke...");
+        searchField.addValueChangeListener(event -> {
+            searchQuery = event.getValue();
+            dataProvider.refreshAll();
         });
 
-        HorizontalLayout searchLayout = new HorizontalLayout(searchField, searchButton);
 
         // Upload component
         MultiFileMemoryBuffer buffer = new MultiFileMemoryBuffer();
         Upload upload = new Upload(buffer);
         upload.setWidthFull();
-        upload.setDropLabel(new Span("Upload Files Here"));
+        upload.setDropLabel(new Span("Naloži datoteke..."));
 
         // Set unlimited file size
         upload.setMaxFileSize(-1);
@@ -141,9 +143,16 @@ public class MainView extends HorizontalLayout {
 
         // TreeGrid component
         treeGrid = new TreeGrid<>();
+        GridHelper.setArrowSelectionEnabled(treeGrid, true);
+
         treeGrid.setHeightFull();
        // treeGrid.setSizeFull(); // Set the size of the TreeGrid to full
-        treeGrid.addComponentHierarchyColumn(this::renderFileSystemItem).setHeader("Name");
+     var nameColum=   treeGrid.addComponentHierarchyColumn(this::renderFileSystemItem).setHeader("Datoteke");
+
+        HeaderRow headerRow = treeGrid.appendHeaderRow();
+
+        headerRow.getCell(nameColum).setComponent(
+                searchField);
 
         dataProvider = new AbstractBackEndHierarchicalDataProvider<FileSystemItem, Void>() {
             @Override
@@ -166,7 +175,7 @@ public class MainView extends HorizontalLayout {
             protected Stream<FileSystemItem> fetchChildrenFromBackEnd(HierarchicalQuery<FileSystemItem, Void> query) {
                 FileSystemItem item = query.getParent();
                 if (item == null) {
-                    return s3Service.listS3Objects("").stream();
+                    return s3Service.listS3Objects(searchQuery).stream();
                 } else {
                     return s3Service.listS3Objects(item.getName()).stream();
                 }
@@ -190,9 +199,21 @@ public class MainView extends HorizontalLayout {
 
 
 
+        Button deleteFolderButton = new Button("Izbriši mapo", VaadinIcon.TRASH.create());
+        deleteFolderButton.addClickListener(event -> {
+            if (selectedFolder != null && selectedFolder.isFolder()) {
+                s3Service.deleteFolder(selectedFolder.getName());
+                Notification.show("Folder deleted successfully", 3000, Notification.Position.MIDDLE);
+                treeGrid.getDataProvider().refreshAll();
+            } else {
+                Notification.show("Please select a folder to delete", 3000, Notification.Position.MIDDLE);
+            }
+        });
 
-
-        leftLayout.add(searchLayout, folderCreationLayout, upload, treeGrid);
+        HorizontalLayout folderDeletionLayout = new HorizontalLayout(deleteFolderButton);
+        leftLayout.add(folderDeletionLayout);
+        folderCreationLayout.add(folderDeletionLayout);
+        leftLayout.add( folderCreationLayout, upload, treeGrid);
         leftLayout.expand(treeGrid); // Ensure TreeGrid takes all remaining space
 
         // Image preview
@@ -204,9 +225,9 @@ public class MainView extends HorizontalLayout {
 
         VerticalLayout previewLayout = new VerticalLayout();
         previewImage = new Image();
-        previewImage.setWidth("100%");
+        //previewImage.setWidth("100%");
         //previewImage.setHeight("100%");
-        previewImage.setMaxWidth("500px");
+   //     previewImage.setMaxWidth("500px");
         previewImage.setMaxHeight("500px");
         previewImage.setVisible(false);
 
@@ -224,6 +245,27 @@ public class MainView extends HorizontalLayout {
         setFlexGrow(1, leftLayout);
         setFlexGrow(1, previewLayout);
     }
+
+    private static Component createFilterHeader(String labelText,
+                                                Consumer<String> filterChangeConsumer) {
+        NativeLabel label = new NativeLabel(labelText);
+        label.getStyle().set("padding-top", "var(--lumo-space-m)")
+                .set("font-size", "var(--lumo-font-size-xs)");
+        TextField textField = new TextField();
+        textField.setValueChangeMode(ValueChangeMode.EAGER);
+        textField.setClearButtonVisible(true);
+        textField.addThemeVariants(TextFieldVariant.LUMO_SMALL);
+        textField.setWidthFull();
+        textField.getStyle().set("max-width", "100%");
+        textField.addValueChangeListener(
+                e -> filterChangeConsumer.accept(e.getValue()));
+        VerticalLayout layout = new VerticalLayout(label, textField);
+        layout.getThemeList().clear();
+        layout.getThemeList().add("spacing-xs");
+
+        return layout;
+    }
+
 
     private Component renderFileSystemItem(FileSystemItem item) {
         Icon icon = getFileIcon(item);
@@ -275,28 +317,6 @@ public class MainView extends HorizontalLayout {
         return fileName.endsWith(".png") || fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".gif");
     }
 
-    private void appendExifData(StringBuilder exifData, String label, Map<TagInfo, String> tagMap, TagInfo tagInfo) {
-        String value = tagMap.get(tagInfo);
-        if (value != null) {
-            exifData.append(label).append(": ").append(value).append("\n");
-        }
-    }
-
-    private void appendExifData(StringBuilder exifData, String label, double value) {
-        exifData.append(label).append(": ").append(value).append("\n");
-    }
-
-    private double convertToDegrees(String dmsString, String ref) {
-        String[] dmsArray = dmsString.split(",");
-        double degrees = Double.parseDouble(dmsArray[0].trim());
-        double minutes = Double.parseDouble(dmsArray[1].trim());
-        double seconds = Double.parseDouble(dmsArray[2].trim());
-        double result = degrees + (minutes / 60.0) + (seconds / 3600.0);
-        if (ref.equals("S") || ref.equals("W")) {
-            result = -result;
-        }
-        return result;
-    }
 
     private void showImagePreview(FileSystemItem item) {
         exifContainer.removeAll();
@@ -305,7 +325,8 @@ public class MainView extends HorizontalLayout {
         previewImage.setVisible(true);
 
         try (InputStream inputStream = s3Service.getFileStream(item.getName())) {
-            var div = readExifData(inputStream, getFileName(item));
+            //var div = readExifData(inputStream, getFileName(item));
+            var div = readExifDatagrid(inputStream, getFileName(item));
             exifContainer.add(div);
             exifContainer.setVisible(true);
 
@@ -403,7 +424,7 @@ return exifData;
         }
     }
 
-    private double convertToDegrees(com.drew.lang.Rational[] coordinate, String ref) {
+    private double convertToDegrees(Rational[] coordinate, String ref) {
         if (coordinate == null || coordinate.length != 3) {
             return 0.0;
         }
@@ -418,4 +439,67 @@ return exifData;
         }
         return result;
     }
+
+
+    private Div readExifDatagrid(InputStream inputStream, String fileName) throws IOException {
+        List<ExifData> exifDataList = new ArrayList<>();
+        Div container = new Div();
+container.setSizeFull();
+        try {
+            Metadata metadata = ImageMetadataReader.readMetadata(inputStream);
+            ExifSubIFDDirectory exifDirectory = metadata.getFirstDirectoryOfType(ExifSubIFDDirectory.class);
+            ExifIFD0Directory ifd0Directory = metadata.getFirstDirectoryOfType(ExifIFD0Directory.class);
+
+            if (exifDirectory != null) {
+                exifDataList.add(new ExifData("Model kamere", ifd0Directory.getString(ExifIFD0Directory.TAG_MODEL)));
+                exifDataList.add(new ExifData("Datum/Čas", exifDirectory.getString(ExifSubIFDDirectory.TAG_DATETIME_ORIGINAL)));
+                exifDataList.add(new ExifData("Širina slike", exifDirectory.getString(ExifSubIFDDirectory.TAG_EXIF_IMAGE_WIDTH)));
+                exifDataList.add(new ExifData("Višina slike", exifDirectory.getString(ExifSubIFDDirectory.TAG_EXIF_IMAGE_HEIGHT)));
+                exifDataList.add(new ExifData("ISO", exifDirectory.getString(ExifSubIFDDirectory.TAG_ISO_EQUIVALENT)));
+                exifDataList.add(new ExifData("Zaslonka", exifDirectory.getString(ExifSubIFDDirectory.TAG_FNUMBER)));
+                exifDataList.add(new ExifData("Čas osvetlitve", exifDirectory.getString(ExifSubIFDDirectory.TAG_EXPOSURE_TIME)));
+                exifDataList.add(new ExifData("Goriščna razdalja", exifDirectory.getString(ExifSubIFDDirectory.TAG_FOCAL_LENGTH)));
+            } else {
+                exifDataList.add(new ExifData("No EXIF data found", ""));
+            }
+
+            GpsDirectory gpsDirectory = metadata.getFirstDirectoryOfType(GpsDirectory.class);
+            if (gpsDirectory != null) {
+                double[] latLon = getDecimalCoordinates(gpsDirectory);
+                if (latLon != null) {
+                    String gpsLink = createGpsLink(latLon[0], latLon[1]);
+                    exifDataList.add(new ExifData("GPS Location", gpsLink));
+                }
+            }
+        } catch (Exception e) {
+            exifDataList.add(new ExifData("Error reading EXIF data", e.getMessage()));
+            e.printStackTrace();
+        } finally {
+            inputStream.close();
+        }
+
+        Grid<ExifData> exifGrid = new Grid<>(ExifData.class, false);
+        exifGrid.addColumn(ExifData::getLabel).setClassNameGenerator(item -> "gray-background").setFlexGrow(0).setWidth("200px").setResizable(true).setRenderer(new ComponentRenderer<>(label -> {
+            Span span = new Span(label.getLabel());
+            span.getStyle().set("font-weight", "bold");
+
+            return span;
+        }));
+
+        exifGrid.addColumn(ExifData::getValue).setFlexGrow(1).setResizable(true).setRenderer(new ComponentRenderer<>(label -> {
+            if(label.getLabel().equals("GPS Location")){
+                Anchor anchor = new Anchor( label.getValue(),"Koordinate");
+                anchor.setTarget("_blank");
+                return anchor;
+            }
+            Span span = new Span(label.getValue());
+
+            return span;
+        }));
+        exifGrid.setItems(exifDataList);
+        exifGrid.setWidthFull();
+        container.add(exifGrid);
+        return container;
+    }
+
 }

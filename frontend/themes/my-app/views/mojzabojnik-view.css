@@ -1,3 +1,51 @@
+
+html {
+  --lumo-font-family: "Ubuntu", -apple-system, BlinkMacSystemFont, "Roboto", "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  font-size: 1rem;
+  --lumo-space-xl: 1.5rem;
+  --lumo-space-l: 1.0rem;
+  --lumo-space-m: 0.4rem;
+  --lumo-space-s: 0.2rem;
+  --lumo-space-xs: 0.1rem;
+  --lumo-font-size: 1rem;
+  --lumo-font-size-xxxl: 1.75rem;
+  --lumo-font-size-xxl: 1.375rem;
+  --lumo-font-size-xl: 1.125rem;
+  --lumo-font-size-l: 1rem;
+  --lumo-font-size-m: 0.875rem;
+  --lumo-font-size-s: 0.8125rem;
+  --lumo-font-size-xs: 0.75rem;
+  --lumo-font-size-xxs: 0.6875rem;
+  --lumo-line-height-m: 1.6;
+  --lumo-line-height-s: 1.4;
+  --lumo-line-height-xs: 1.2;
+
+
+
+
+}
+
+.gray-background {
+  background-color: lightgray;
+
+}
+
+
+
+.exif-label {
+  background-color: lightgray;
+  font-weight: bold;
+}
+.bold-label {
+  font-weight: bold;
+  font-size: xx-large;
+}
+
+
+
+
+
+
 /*.border-layout {*/
 /*  border: 2px solid black;*/
 /*  padding: 10px;*/
