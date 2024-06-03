@@ -12,6 +12,7 @@ import com.example.application.services.ExifData;
 import com.example.application.services.S3Service;
 import com.flowingcode.vaadin.addons.gridhelpers.GridHelper;
 import com.vaadin.flow.component.Component;
+import com.vaadin.flow.component.Html;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.grid.Grid;
 import com.vaadin.flow.component.grid.HeaderRow;
@@ -33,31 +34,29 @@ import com.vaadin.flow.data.renderer.ComponentRenderer;
 import com.vaadin.flow.data.value.ValueChangeMode;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.server.StreamResource;
-import org.apache.commons.imaging.formats.tiff.taginfos.TagInfo;
+import com.vaadin.flow.server.auth.AnonymousAllowed;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
+@AnonymousAllowed
 @Route("")
 public class MainView extends HorizontalLayout {
 
     private final S3Service s3Service;
-
-
+    private final Anchor mapLink;
+    private final VerticalLayout exifContainer = new VerticalLayout();
     String searchQuery;
     private TreeGrid<FileSystemItem> treeGrid;
     private FileSystemItem selectedFolder;
     private Image previewImage;
-    private  HierarchicalDataProvider<FileSystemItem, Void> dataProvider = null;
-    private final Anchor mapLink;
-    private final VerticalLayout exifContainer = new VerticalLayout();
+    private HierarchicalDataProvider<FileSystemItem, Void> dataProvider = null;
+    private Html previewVideo;
 
     @Autowired
     public MainView(S3Service s3Service) {
@@ -69,8 +68,8 @@ public class MainView extends HorizontalLayout {
 
         VerticalLayout leftLayout = new VerticalLayout();
         leftLayout.setSizeFull();
-        leftLayout.setPadding(false);
-        leftLayout.setSpacing(false);
+        leftLayout.setPadding(true);
+        leftLayout.setSpacing(true);
 
         // Create folder components
         TextField folderNameField = new TextField();
@@ -96,7 +95,8 @@ public class MainView extends HorizontalLayout {
             }
         });
 
-        HorizontalLayout folderCreationLayout = new HorizontalLayout(folderNameField, createFolderButton);
+        HorizontalLayout toolbar = new HorizontalLayout();
+        toolbar.setDefaultVerticalComponentAlignment(Alignment.CENTER);
 
         TextField searchField = new TextField();
         searchField.setPlaceholder("Išči datoteke...");
@@ -143,11 +143,13 @@ public class MainView extends HorizontalLayout {
 
         // TreeGrid component
         treeGrid = new TreeGrid<>();
+
         GridHelper.setArrowSelectionEnabled(treeGrid, true);
 
         treeGrid.setHeightFull();
-       // treeGrid.setSizeFull(); // Set the size of the TreeGrid to full
-     var nameColum=   treeGrid.addComponentHierarchyColumn(this::renderFileSystemItem).setHeader("Datoteke");
+        // treeGrid.setSizeFull(); // Set the size of the TreeGrid to full
+        var nameColum = treeGrid.addComponentHierarchyColumn(this::renderFileSystemItem).setHeader("Datoteke");
+
 
         HeaderRow headerRow = treeGrid.appendHeaderRow();
 
@@ -187,16 +189,18 @@ public class MainView extends HorizontalLayout {
 
         treeGrid.addSelectionListener(event -> {
             exifContainer.removeAll();
-             event.getFirstSelectedItem().ifPresent(item -> {
+            event.getFirstSelectedItem().ifPresent(item -> {
 
-                 if (isImageFile(item.getName())) {
-                     showImagePreview(item);
-                 } else {
-                     previewImage.setVisible(false);
-                 }
-              });
-              });
-
+                if (isImageFile(item.getName())) {
+                    showImagePreview(item);
+                } else if (isVideoFile(item.getName())) {
+                    showVideoPreview(item);
+                } else {
+                    previewImage.setVisible(false);
+                    previewVideo.setVisible(false);
+                }
+            });
+        });
 
 
         Button deleteFolderButton = new Button("Izbriši mapo", VaadinIcon.TRASH.create());
@@ -210,10 +214,10 @@ public class MainView extends HorizontalLayout {
             }
         });
 
-        HorizontalLayout folderDeletionLayout = new HorizontalLayout(deleteFolderButton);
-        leftLayout.add(folderDeletionLayout);
-        folderCreationLayout.add(folderDeletionLayout);
-        leftLayout.add( folderCreationLayout, upload, treeGrid);
+
+        toolbar.add(folderNameField, createFolderButton, deleteFolderButton, upload);
+
+        leftLayout.add(toolbar, treeGrid);
         leftLayout.expand(treeGrid); // Ensure TreeGrid takes all remaining space
 
         // Image preview
@@ -227,7 +231,7 @@ public class MainView extends HorizontalLayout {
         previewImage = new Image();
         //previewImage.setWidth("100%");
         //previewImage.setHeight("100%");
-   //     previewImage.setMaxWidth("500px");
+        //     previewImage.setMaxWidth("500px");
         previewImage.setMaxHeight("500px");
         previewImage.setVisible(false);
 
@@ -239,7 +243,11 @@ public class MainView extends HorizontalLayout {
         mapLink.setText("Prikaži na Google Zemljevidih");
         mapLink.setVisible(false);
 
-        previewLayout.add(previewImage, exifContainer, mapLink);
+        previewVideo = new Html("<BR>");
+        previewVideo.setVisible(false);
+
+
+        previewLayout.add(previewImage, previewVideo, exifContainer, mapLink);
 
         add(leftLayout, previewLayout);
         setFlexGrow(1, leftLayout);
@@ -266,7 +274,6 @@ public class MainView extends HorizontalLayout {
         return layout;
     }
 
-
     private Component renderFileSystemItem(FileSystemItem item) {
         Icon icon = getFileIcon(item);
         String name = getFileName(item);
@@ -278,6 +285,21 @@ public class MainView extends HorizontalLayout {
 
 
         return layout;
+    }
+
+    private void showVideoPreview(FileSystemItem item) {
+        previewImage.setVisible(false); // Hide image if previously shown
+        exifContainer.removeAll();
+        String videoUrl = "/video/" + item.getName();
+        String videoHtml = "<video width='500' height='500' controls><source src='" + videoUrl + "' type='video/mp4'>Your browser does not support the video tag.</video>";
+        previewVideo.setVisible(true);
+
+        previewVideo.getElement().setProperty("innerHTML", videoHtml);
+    }
+
+    private boolean isVideoFile(String fileName) {
+        fileName = fileName.toLowerCase();
+        return fileName.endsWith(".mp4") || fileName.endsWith(".webm") || fileName.endsWith(".ogg");
     }
 
     private Icon getFileIcon(FileSystemItem item) {
@@ -403,7 +425,7 @@ public class MainView extends HorizontalLayout {
         } finally {
             inputStream.close();
         }
-return exifData;
+        return exifData;
 
     }
 
@@ -444,7 +466,7 @@ return exifData;
     private Div readExifDatagrid(InputStream inputStream, String fileName) throws IOException {
         List<ExifData> exifDataList = new ArrayList<>();
         Div container = new Div();
-container.setSizeFull();
+        container.setSizeFull();
         try {
             Metadata metadata = ImageMetadataReader.readMetadata(inputStream);
             ExifSubIFDDirectory exifDirectory = metadata.getFirstDirectoryOfType(ExifSubIFDDirectory.class);
@@ -487,8 +509,8 @@ container.setSizeFull();
         }));
 
         exifGrid.addColumn(ExifData::getValue).setFlexGrow(1).setResizable(true).setRenderer(new ComponentRenderer<>(label -> {
-            if(label.getLabel().equals("GPS Location")){
-                Anchor anchor = new Anchor( label.getValue(),"Koordinate");
+            if (label.getLabel().equals("GPS Location")) {
+                Anchor anchor = new Anchor(label.getValue(), "Koordinate");
                 anchor.setTarget("_blank");
                 return anchor;
             }
