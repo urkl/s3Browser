@@ -85,11 +85,14 @@ public class MainView extends HorizontalLayout {
                 if (selectedFolder != null) {
                     treeGrid.getDataProvider().refreshItem(selectedFolder, true);
                     if (!treeGrid.isExpanded(selectedFolder)) {
+                        treeGrid.getDataProvider().refreshAll();
                         treeGrid.expand(selectedFolder);
                     }
                 } else {
                     treeGrid.getDataProvider().refreshAll();
                 }
+
+
             } else {
                 Notification.show("Ime mape ne more biti prazno", 3000, Notification.Position.MIDDLE);
             }
